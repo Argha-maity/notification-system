@@ -2,7 +2,7 @@ package argha.example.notification_processing_system.repository;
 
 import argha.example.notification_processing_system.entity.Job;
 import argha.example.notification_processing_system.entity.type.JobStatus;
-import org.hibernate.query.Page;
+import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -20,6 +20,8 @@ public interface JobRepository extends JpaRepository<Job, Long> {
     long countByJobTypeAndStatus(String jobType, JobStatus status);
 
     List<Job> findByStatus(JobStatus status);
+
+    Page<Job> findByStatus(JobStatus status, Pageable pageable);
 
     List<Job> findByCreatedAtAfter(LocalDateTime createdAt);
 

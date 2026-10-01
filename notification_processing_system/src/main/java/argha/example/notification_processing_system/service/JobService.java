@@ -1,6 +1,7 @@
 package argha.example.notification_processing_system.service;
 
 import argha.example.notification_processing_system.dto.request.JobRequest;
+import argha.example.notification_processing_system.dto.response.DeadLetterJobResponse;
 import argha.example.notification_processing_system.dto.response.JobAttemptResponse;
 import argha.example.notification_processing_system.dto.response.JobResponse;
 import argha.example.notification_processing_system.dto.response.JobStatsResponse;
@@ -13,6 +14,8 @@ import argha.example.notification_processing_system.repository.JobRepository;
 import argha.example.notification_processing_system.repository.NotificationRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -145,6 +148,65 @@ public class JobService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public Page<JobResponse> getJobsByStatus(JobStatus status, Pageable pageable) {
+//        log.info("Fetching jobs with status: {}, page: {}, size: {}",
+//                status, pageable.getPageNumber(), pageable.getPageSize());
+
+        try {
+            Page<Job> jobsPage;
+
+            if ("ALL".equals(status)) {
+                jobsPage = jobRepository.findAll(pageable);
+            } else {
+                jobsPage = jobRepository.findByStatus(status, (java.awt.print.Pageable) pageable);
+            }
+
+            Page<JobResponse> responsePage = jobsPage.map(this::convertToJobResponse);
+            return responsePage;
+        } catch (Exception e) {
+            log.error("Error fetching jobs by status", e);
+            throw new RuntimeException("Failed to fetch jobs", e);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public Page<DeadLetterJobResponse> getDeadLetterQueue(Pageable pageable) {
+        log.info("Fetching dead letter queue, page: {}, size: {}",
+                pageable.getPageNumber(), pageable.getPageSize());
+
+        try {
+            Page<Job> dlqJobs = jobRepository.findByStatus(JobStatus.DEAD_LETTER, (java.awt.print.Pageable)pageable);
+            Page<DeadLetterJobResponse> responsePage = dlqJobs.map(this::convertToDeadLetterResponse);
+            return responsePage;
+        } catch (Exception e) {
+            log.error("Error fetching dead letter queue", e);
+            throw new RuntimeException("Failed to fetch dead letter queue", e);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public List<JobResponse> getRecentJobs(int hours) {
+        log.info("Fetching recent jobs from last {} hours", hours);
+
+        try {
+            LocalDateTime startTime = LocalDateTime.now().minus(hours, ChronoUnit.HOURS);
+            List<Job> jobs = jobRepository.findByCreatedAtAfter(startTime);
+            return jobs.stream().map(this::convertToJobResponse).collect(Collectors.toList());
+        } catch (Exception e) {
+            log.error("Error fetching recent jobs", e);
+            throw new RuntimeException("Failed to fetch recent jobs", e);
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public JobStatsResponse getJobsStatsByDateRange(String startDate, String endDate) {
+        log.info("Fetching job stats for date range: {} to {}", startDate, endDate);
+
+        // TODO: Implement date range filtering
+        return getJobStats();
+    }
+
     @Transactional
     public boolean deleteJob(Long jobId){
 //        log.info("Deleting job ID: {}", jobId);
@@ -243,5 +305,46 @@ public class JobService {
                 .max((a, b) -> Long.compare(a.getValue(), b.getValue()))
                 .map(Map.Entry::getKey)
                 .orElse(null);
+    }
+
+    // ============ Helper Methods ============
+
+    private JobResponse convertToJobResponse(Job job) {
+        return JobResponse.builder()
+                .jobId(job.getJobId())
+                .notificationId(String.valueOf(job.getNotification().getNotificationId()))
+                .status(job.getStatus())
+                .jobType(job.getJobType())
+//                .recipient(job.getRecipient())
+//                .subject(job.getSubject())
+                .attemptCount(job.getAttemptCount())
+                .maxAttempts(5)
+                .createdAt(job.getCreatedAt())
+                .completedAt(job.getCompletedAt())
+                .lastError(job.getLast_error())
+                .processingTimeSeconds(job.getProcessingTime())
+//                .workerId(job.getWorkerId())
+                .priority(String.valueOf(job.getPriority()))
+//                .userId(job.getUserId())
+//                .inDeadLetterQueue(job.isInDeadLetterQueue())
+                .build();
+    }
+
+    private DeadLetterJobResponse convertToDeadLetterResponse(Job job) {
+        return DeadLetterJobResponse.builder()
+                .jobId(job.getJobId())
+                .notificationId(String.valueOf(job.getNotification().getNotificationId()))
+                .type(job.getJobType())
+//                .recipient(job.getRecipient())
+//                .subject(job.getSubject())
+                .attemptCount(job.getAttemptCount())
+                .maxAttempts(5)
+                .lastError(job.getLast_error())
+                .createdAt(job.getCreatedAt())
+                .lastAttemptedAt(job.getUpdatedAt())
+//                .userId(job.getUserId())
+                .priority(String.valueOf(job.getPriority()))
+                .canRetry(true)
+                .build();
     }
 }

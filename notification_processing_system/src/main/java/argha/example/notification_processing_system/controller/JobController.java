@@ -1,13 +1,18 @@
 package argha.example.notification_processing_system.controller;
 
+import argha.example.notification_processing_system.dto.response.DeadLetterJobResponse;
 import argha.example.notification_processing_system.dto.response.JobAttemptResponse;
 import argha.example.notification_processing_system.dto.response.JobResponse;
 import argha.example.notification_processing_system.dto.response.JobStatsResponse;
+import argha.example.notification_processing_system.entity.type.JobStatus;
 import argha.example.notification_processing_system.security.UserPrincipal;
 import argha.example.notification_processing_system.service.JobProcessingService;
 import argha.example.notification_processing_system.service.JobService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -63,15 +68,19 @@ public class JobController {
         }
     }
 
-//    @GetMapping()
-//    public ResponseEntity<?> getAllJobs(){
-//        try {
-//
-//        }catch (Exception e){
-//            log.error("Error fetching jobs", e);
-//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
-//        }
-//    }
+    @GetMapping()
+    public ResponseEntity<Page<JobResponse>> getAllJobs(@RequestParam(defaultValue = "0") int page,
+                                                        @RequestParam(defaultValue = "20") int size,
+                                                        @RequestParam(defaultValue = "ALL") JobStatus status){
+        log.info("Fetching jobs - page: {}, size: {}, status: {}", page, size, status);
+        try {
+            Pageable pageable = PageRequest.of(page, size);
+            Page<JobResponse> jobs = jobService.getJobsByStatus(status, pageable);
+            return ResponseEntity.ok(jobs);        }catch (Exception e){
+            log.error("Error fetching jobs", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
 
     @PostMapping("/{id}/retry")
     public ResponseEntity<?> retryJob(@PathVariable(name = "id") Long jobId) {
@@ -130,4 +139,22 @@ public class JobController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
+
+    @GetMapping("/dead-letter")
+    public ResponseEntity<Page<DeadLetterJobResponse>> getDeadLetterQueue(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        log.info("Fetching dead letter queue - page: {}, size: {}", page, size);
+        try {
+            Pageable pageable = PageRequest.of(page, size);
+            Page<DeadLetterJobResponse> dlqJobs = jobService.getDeadLetterQueue(pageable);
+            return ResponseEntity.ok(dlqJobs);
+        } catch (Exception e) {
+            log.error("Error fetching dead letter queue", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+
 }

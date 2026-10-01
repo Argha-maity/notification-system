@@ -14,9 +14,26 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 public class JobResponse {
     private Long jobId;
+    private String notificationId;
+    private String recipient;
+    private String subject;
+    private int maxAttempts;
     private String jobType;
     private JobStatus status;
     private int attemptCount;
     private LocalDateTime createdAt;
     private LocalDateTime completedAt;
+    private String lastError;
+    private Double processingTimeSeconds;
+    private String workerId;
+    private String priority;
+    private String requestId;
+    private Long userId;
+    private LocalDateTime nextRetryAt;
+    private String channel;
+    private boolean inDeadLetterQueue;
+    private String metadata;
+    private String templateName;
+    private Integer httpStatusCode;
+    private String responseBody;
 }
