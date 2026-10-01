@@ -70,4 +70,9 @@ public class JobProcessingService {
             jobRepository.save(job);
         }
     }
+
+
+    public boolean retryJob(Long jobId){
+        return jobRepository.findById(jobId).isPresent();
+    }
 }

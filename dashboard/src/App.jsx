@@ -28,48 +28,28 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState(new Date());
 
   const fetchData = async () => {
-    setLoading(true);
-    try {
-      const mockStats = {
-        total: 1247,
-        pending: 45,
-        processing: 12,
-        completed: 1150,
-        failed: 40,
-        deadLetterCount: 8,
-        successRate: 92.3,
-        avgProcessingTime: 2.5,
-        workersActive: 5,
-        queueSize: 45,
-      };
-
-      const mockJobs = [
-        { jobId: 1247, status: 'COMPLETED', type: 'EMAIL', attempts: 1, createdAt: '2026-01-15 10:30:45', completedAt: '2026-01-15 10:30:48', lastError: null },
-        { jobId: 1246, status: 'PROCESSING', type: 'EMAIL', attempts: 1, createdAt: '2026-01-15 10:30:40', completedAt: null, lastError: null },
-        { jobId: 1245, status: 'PENDING', type: 'EMAIL', attempts: 1, createdAt: '2026-01-15 10:30:35', completedAt: null, lastError: null },
-        { jobId: 1244, status: 'COMPLETED', type: 'EMAIL', attempts: 2, createdAt: '2026-01-15 10:30:30', completedAt: '2026-01-15 10:30:55', lastError: null },
-        { jobId: 1243, status: 'FAILED', type: 'EMAIL', attempts: 5, createdAt: '2026-01-15 10:30:25', completedAt: null, lastError: 'SMTP timeout' },
-        { jobId: 1242, status: 'COMPLETED', type: 'EMAIL', attempts: 1, createdAt: '2026-01-15 10:30:20', completedAt: '2026-01-15 10:30:22', lastError: null },
-        { jobId: 1241, status: 'PENDING', type: 'EMAIL', attempts: 1, createdAt: '2026-01-15 10:30:15', completedAt: null, lastError: null },
-        { jobId: 1240, status: 'COMPLETED', type: 'EMAIL', attempts: 3, createdAt: '2026-01-15 10:30:10', completedAt: '2026-01-15 10:30:40', lastError: null },
-      ];
-
-      const mockDeadLetterJobs = [
-        { jobId: 1243, status: 'FAILED', type: 'EMAIL', attempts: 5, lastError: 'SMTP timeout', movedAt: '2026-01-15 10:31:00' },
-        { jobId: 1239, status: 'FAILED', type: 'EMAIL', attempts: 5, lastError: 'Invalid recipient email', movedAt: '2026-01-15 09:45:30' },
-        { jobId: 1233, status: 'FAILED', type: 'EMAIL', attempts: 5, lastError: 'Mail server rejected', movedAt: '2026-01-15 08:20:15' },
-      ];
-
-      setStats(mockStats);
-      setJobs(mockJobs);
-      setDeadLetterJobs(mockDeadLetterJobs);
-      setLastUpdated(new Date());
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  setLoading(true);
+  try {
+    const statsResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.STATS}`);
+    const stats = await statsResponse.json();
+    
+    const jobsResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.JOBS}`);
+    const jobsData = await jobsResponse.json();
+    
+    const dlqResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.DEAD_LETTER_QUEUE}`);
+    const dlqJobs = await dlqResponse.json();
+    
+    setStats(stats);
+    setJobs(jobsData.content || jobsData); // Adjust based on your API response format
+    setDeadLetterJobs(dlqJobs);
+    setLastUpdated(new Date());
+  } catch (error) {
+    console.error('Error fetching data:', error);
+    // Keep mock data as fallback
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     fetchData();

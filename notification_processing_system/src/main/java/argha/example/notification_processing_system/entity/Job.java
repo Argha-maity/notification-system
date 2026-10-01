@@ -48,6 +48,7 @@ public class Job {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
     private String last_error;
+    private double processingTime;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
@@ -55,7 +56,7 @@ public class Job {
 
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
-    private LocalDateTime updated_at;
+    private LocalDateTime updatedAt;
 
     @OneToOne(cascade = CascadeType.ALL)
     @JoinColumn(name = "notification_id")
