@@ -47,7 +47,18 @@ public class Notification {
     @JoinColumn(name = "user_id")
     private User user;
 
-    @OneToOne(mappedBy = "notification", cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "notification", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @JsonIgnore
-    private Job job;
+    private java.util.List<Job> jobs;
+
+    public Job getJob() {
+        return (jobs != null && !jobs.isEmpty()) ? jobs.get(jobs.size() - 1) : null;
+    }
+
+    public void setJob(Job job) {
+        if (this.jobs == null) {
+            this.jobs = new java.util.ArrayList<>();
+        }
+        this.jobs.add(job);
+    }
 }

@@ -5,6 +5,7 @@ import JobsTable from './components/JobsTable';
 import DeadLetterQueue from './components/DeadLetterQueue';
 import WorkerStats from './components/WorkerStats';
 import Charts from './components/Charts';
+import API_CONFIG from './config/api.js'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -30,8 +31,9 @@ export default function App() {
   const fetchData = async () => {
   setLoading(true);
   try {
-    const statsResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.STATS}`);
-    const stats = await statsResponse.json();
+    // const statsResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.STATS}`);
+    // const stats = await statsResponse.json();
+    const stats = await apiGet(API_CONFIG.ENDPOINTS.STATS);
     
     const jobsResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.JOBS}`);
     const jobsData = await jobsResponse.json();

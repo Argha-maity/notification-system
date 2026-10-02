@@ -43,6 +43,8 @@ public class NotificationController {
 
     @GetMapping("/{notificationId}")
     public ResponseEntity<?> getNotification(@AuthenticationPrincipal UserPrincipal userDetails, @PathVariable Long notificationId){
+        if (userDetails == null)
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("User not logged in");
         User currentUser = userDetails.getUser();
         Notification notification = notificationService.findNotificationById(notificationId);
 

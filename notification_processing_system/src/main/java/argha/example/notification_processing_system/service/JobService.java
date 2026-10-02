@@ -5,6 +5,7 @@ import argha.example.notification_processing_system.dto.response.DeadLetterJobRe
 import argha.example.notification_processing_system.dto.response.JobAttemptResponse;
 import argha.example.notification_processing_system.dto.response.JobResponse;
 import argha.example.notification_processing_system.dto.response.JobStatsResponse;
+import argha.example.notification_processing_system.entity.DeadLetterJob;
 import argha.example.notification_processing_system.entity.Job;
 import argha.example.notification_processing_system.entity.JobAttempt;
 import argha.example.notification_processing_system.entity.Notification;
@@ -12,92 +13,88 @@ import argha.example.notification_processing_system.entity.type.JobStatus;
 import argha.example.notification_processing_system.queue.RedisQueueService;
 import argha.example.notification_processing_system.repository.JobRepository;
 import argha.example.notification_processing_system.repository.NotificationRepository;
+import argha.example.notification_processing_system.repository.WorkerRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 @Slf4j
 public class JobService {
 
-    @Autowired
-    private JobRepository jobRepository;
-
-    @Autowired
-    private NotificationRepository notificationRepository;
-
-    @Autowired
-    private RedisQueueService redisQueueService;
+    private final JobRepository jobRepository;
+    private final NotificationRepository notificationRepository;
+    private final RedisQueueService redisQueueService;
+    private final WorkerRepository workerRepository;
 
     @Transactional
     public Job createNewJob(JobRequest request) {
-        Long notificationId=request.getNotificationId();
-        Notification notification=notificationRepository.findById(notificationId).orElse(null);
-        if(notification==null)
+        Long notificationId = request.getNotificationId();
+        Notification notification = notificationRepository.findById(notificationId).orElse(null);
+        if (notification == null)
             throw new IllegalArgumentException("Notification id not found");
 
-        Job job=Job.builder()
+        Job job = Job.builder()
                 .jobType(request.getJobType())
-                .status(request.getStatus())
-                .priority(1)
-                .attemptCount(1)
-                .maxAttempts(3)
+                .status(request.getStatus() != null ? request.getStatus() : JobStatus.PENDING)
+                .priority(request.getPriority() > 0 ? request.getPriority() : 1)
+                .attemptCount(0)
+                .maxAttempts(request.getAttempts() > 0 ? request.getAttempts() : 5)
                 .idempotencyKey(UUID.randomUUID().toString())
                 .last_error("")
                 .notification(notification)
                 .build();
 
-        Job jobCreated=jobRepository.save(job);
+        Job jobCreated = jobRepository.save(job);
 
-        try {//prevent from being orphaned by using @Transactional
+        try {
             redisQueueService.enqueue(jobCreated.getJobId());
-        }catch(Exception e){
+        } catch (Exception e) {
             throw new RuntimeException("Failed to enqueue job", e);
         }
 
         return jobCreated;
     }
 
-    public JobResponse getJobById(Long id){
-        Job job=jobRepository.findById(id).orElse(null);
-        if(job==null)
+    public JobResponse getJobById(Long id) {
+        Job job = jobRepository.findById(id).orElse(null);
+        if (job == null)
             throw new IllegalArgumentException("Job id not found");
 
-        return JobResponse.builder()
-                .jobId(id)
-                .jobType(job.getJobType())
-                .status(job.getStatus())
-                .attemptCount(job.getAttemptCount())
-                .createdAt(job.getCreatedAt())
-                .completedAt(job.getCompletedAt())
-                .build();
+        return convertToJobResponse(job);
     }
 
-    public List<JobAttemptResponse> getAttemptsOfJob(Long jobId){
-        Job job=jobRepository.findById(jobId).orElse(null);
-        if(job==null)
+    public List<JobAttemptResponse> getAttemptsOfJob(Long jobId) {
+        Job job = jobRepository.findById(jobId).orElse(null);
+        if (job == null)
             throw new IllegalArgumentException("Job id not found");
 
-        List<JobAttempt> jobAttempts=job.getJobAttempts();
-        List<JobAttemptResponse> attempts=new ArrayList<>();
+        List<JobAttempt> jobAttempts = job.getJobAttempts();
+        List<JobAttemptResponse> attempts = new ArrayList<>();
 
-        for(JobAttempt jobAttempt:jobAttempts)
-            attempts.add(new JobAttemptResponse(jobAttempt));
+        if (jobAttempts != null) {
+            for (JobAttempt jobAttempt : jobAttempts)
+                attempts.add(new JobAttemptResponse(jobAttempt));
+        }
 
         return attempts;
     }
 
     @Transactional(readOnly = true)
-    public JobStatsResponse getJobStats(){
-        try{
+    public JobStatsResponse getJobStats() {
+        try {
             long total = jobRepository.count();
             long pending = jobRepository.countByStatus(JobStatus.PENDING);
             long processing = jobRepository.countByStatus(JobStatus.PROCESSING);
@@ -120,6 +117,8 @@ public class JobService {
             double smsSuccessRate = calculateChannelSuccessRate("SMS");
             double pushSuccessRate = calculateChannelSuccessRate("PUSH");
 
+            int activeWorkers = workerRepository != null ? workerRepository.countActiveWorkers() : 0;
+
             return JobStatsResponse.builder()
                     .total(total)
                     .pending(pending)
@@ -129,12 +128,12 @@ public class JobService {
                     .deadLetterCount(deadLetterCount)
                     .successRate(successRate)
                     .avgProcessingTime(avgProcessingTime)
-                    .workersActive(5) // TODO: Get from worker registry
+                    .workersActive(activeWorkers)
                     .queueSize(queueSize)
                     .avgRetryCount(calculateAverageRetryCount())
                     .mostCommonError(getMostCommonError())
                     .lastUpdated(System.currentTimeMillis())
-                    .systemUptime(0) // TODO: Calculate from app start time
+                    .systemUptime(0)
                     .emailSuccessRate(emailSuccessRate)
                     .smsSuccessRate(smsSuccessRate)
                     .pushSuccessRate(pushSuccessRate)
@@ -142,32 +141,37 @@ public class JobService {
                     .redisStatus("HEALTHY")
                     .emailServiceStatus("HEALTHY")
                     .build();
-        }catch (Exception e){
+        } catch (Exception e) {
             log.error("Error calculating job statistics", e);
             throw new RuntimeException("Failed to calculate job statistics", e);
         }
     }
 
     @Transactional(readOnly = true)
-    public Page<JobResponse> getJobsByStatus(JobStatus status, Pageable pageable) {
-//        log.info("Fetching jobs with status: {}, page: {}, size: {}",
-//                status, pageable.getPageNumber(), pageable.getPageSize());
-
+    public Page<JobResponse> getJobsByStatus(String statusStr, Pageable pageable) {
         try {
             Page<Job> jobsPage;
-
-            if ("ALL".equals(status)) {
+            if (statusStr == null || "ALL".equalsIgnoreCase(statusStr.trim())) {
                 jobsPage = jobRepository.findAll(pageable);
             } else {
-                jobsPage = jobRepository.findByStatus(status, (java.awt.print.Pageable) pageable);
+                try {
+                    JobStatus status = JobStatus.valueOf(statusStr.trim().toUpperCase());
+                    jobsPage = jobRepository.findByStatus(status, pageable);
+                } catch (IllegalArgumentException e) {
+                    log.warn("Unknown job status '{}', returning all jobs", statusStr);
+                    jobsPage = jobRepository.findAll(pageable);
+                }
             }
-
-            Page<JobResponse> responsePage = jobsPage.map(this::convertToJobResponse);
-            return responsePage;
+            return jobsPage.map(this::convertToJobResponse);
         } catch (Exception e) {
             log.error("Error fetching jobs by status", e);
             throw new RuntimeException("Failed to fetch jobs", e);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public Page<JobResponse> getJobsByStatus(JobStatus status, Pageable pageable) {
+        return getJobsByStatus(status != null ? status.name() : "ALL", pageable);
     }
 
     @Transactional(readOnly = true)
@@ -176,9 +180,8 @@ public class JobService {
                 pageable.getPageNumber(), pageable.getPageSize());
 
         try {
-            Page<Job> dlqJobs = jobRepository.findByStatus(JobStatus.DEAD_LETTER, (java.awt.print.Pageable)pageable);
-            Page<DeadLetterJobResponse> responsePage = dlqJobs.map(this::convertToDeadLetterResponse);
-            return responsePage;
+            Page<Job> dlqJobs = jobRepository.findByStatus(JobStatus.DEAD_LETTER, pageable);
+            return dlqJobs.map(this::convertToDeadLetterResponse);
         } catch (Exception e) {
             log.error("Error fetching dead letter queue", e);
             throw new RuntimeException("Failed to fetch dead letter queue", e);
@@ -202,14 +205,58 @@ public class JobService {
     @Transactional(readOnly = true)
     public JobStatsResponse getJobsStatsByDateRange(String startDate, String endDate) {
         log.info("Fetching job stats for date range: {} to {}", startDate, endDate);
+        try {
+            LocalDateTime start;
+            LocalDateTime end;
+            if (startDate != null && !startDate.isBlank()) {
+                start = LocalDate.parse(startDate, DateTimeFormatter.ISO_DATE).atStartOfDay();
+            } else {
+                start = LocalDateTime.now().minusDays(30);
+            }
 
-        // TODO: Implement date range filtering
-        return getJobStats();
+            if (endDate != null && !endDate.isBlank()) {
+                end = LocalDate.parse(endDate, DateTimeFormatter.ISO_DATE).atTime(23, 59, 59);
+            } else {
+                end = LocalDateTime.now();
+            }
+
+            long total = jobRepository.countByCreatedAtBetween(start, end);
+            long pending = jobRepository.countByStatusAndCreatedAtBetween(JobStatus.PENDING, start, end);
+            long processing = jobRepository.countByStatusAndCreatedAtBetween(JobStatus.PROCESSING, start, end);
+            long completed = jobRepository.countByStatusAndCreatedAtBetween(JobStatus.COMPLETED, start, end);
+            long failed = jobRepository.countByStatusAndCreatedAtBetween(JobStatus.FAILED, start, end);
+            long deadLetterCount = jobRepository.countByStatusAndCreatedAtBetween(JobStatus.DEAD_LETTER, start, end);
+
+            double successRate = total > 0 ? (completed / (double) total) * 100 : 0;
+            Double avgProcessing = jobRepository.getAverageProcessingTimeBetween(start, end);
+
+            return JobStatsResponse.builder()
+                    .total(total)
+                    .pending(pending)
+                    .processing(processing)
+                    .completed(completed)
+                    .failed(failed)
+                    .deadLetterCount(deadLetterCount)
+                    .successRate(successRate)
+                    .avgProcessingTime(avgProcessing != null ? avgProcessing : 0.0)
+                    .workersActive(workerRepository != null ? workerRepository.countActiveWorkers() : 0)
+                    .queueSize((int) (pending + processing))
+                    .avgRetryCount(calculateAverageRetryCount())
+                    .mostCommonError(getMostCommonError())
+                    .lastUpdated(System.currentTimeMillis())
+                    .databaseStatus("HEALTHY")
+                    .redisStatus("HEALTHY")
+                    .emailServiceStatus("HEALTHY")
+                    .build();
+        } catch (Exception e) {
+            log.error("Error calculating date range job stats, falling back to overall stats", e);
+            return getJobStats();
+        }
     }
 
     @Transactional
-    public boolean deleteJob(Long jobId){
-//        log.info("Deleting job ID: {}", jobId);
+    public boolean deleteJob(Long jobId) {
+        log.info("Deleting job ID: {}", jobId);
         try {
             if (jobRepository.existsById(jobId)) {
                 jobRepository.deleteById(jobId);
@@ -217,14 +264,13 @@ public class JobService {
             }
             return false;
         } catch (Exception e) {
-            log.error("Error deleting job", e);
+            log.error("Error deleting job {}", jobId, e);
             throw new RuntimeException("Failed to delete job", e);
         }
     }
 
     @Transactional(readOnly = true)
     public Object getJobTimeline(int hours) {
-//        log.info("Fetching job timeline for last {} hours", hours);
         try {
             LocalDateTime startTime = LocalDateTime.now().minus(hours, ChronoUnit.HOURS);
             List<Job> jobs = jobRepository.findByCreatedAtAfter(startTime);
@@ -233,7 +279,7 @@ public class JobService {
             Map<String, Map<String, Long>> timeline = new HashMap<>();
 
             jobs.forEach(job -> {
-                String hourKey = job.getCreatedAt().toString().substring(0, 13);
+                String hourKey = job.getCreatedAt() != null ? job.getCreatedAt().toString().substring(0, 13) : "unknown";
                 timeline.computeIfAbsent(hourKey, k -> new HashMap<>())
                         .merge(String.valueOf(job.getStatus()), 1L, Long::sum);
             });
@@ -246,40 +292,33 @@ public class JobService {
     }
 
     @Transactional(readOnly = true)
-    public Object getProcessingTimeAnalytics(){
-        try{
-            List<Job> completedJobs = jobRepository.findByStatus(JobStatus.COMPLETED);
-
+    public Object getProcessingTimeAnalytics() {
+        try {
+            List<Object[]> statsList = jobRepository.getProcessingTimeStats();
             Map<String, Object> analytics = new HashMap<>();
-            analytics.put("min", completedJobs.stream()
-                    .map(Job::getProcessingTime)
-                    .filter(Objects::nonNull)
-                    .mapToDouble(Double::doubleValue)
-                    .min()
-                    .orElse(0.0));
+            double min = 0.0;
+            double max = 0.0;
+            double avg = 0.0;
 
-            analytics.put("max", completedJobs.stream()
-                    .map(Job::getProcessingTime)
-                    .filter(Objects::nonNull)
-                    .mapToDouble(Double::doubleValue)
-                    .max()
-                    .orElse(0.0));
+            if (statsList != null && !statsList.isEmpty() && statsList.get(0) != null) {
+                Object[] stats = statsList.get(0);
+                if (stats[0] != null) min = ((Number) stats[0]).doubleValue();
+                if (stats[1] != null) max = ((Number) stats[1]).doubleValue();
+                if (stats[2] != null) avg = ((Number) stats[2]).doubleValue();
+            }
 
-            analytics.put("avg", completedJobs.stream()
-                    .map(Job::getProcessingTime)
-                    .filter(Objects::nonNull)
-                    .mapToDouble(Double::doubleValue)
-                    .average()
-                    .orElse(0.0));
+            analytics.put("min", min);
+            analytics.put("max", max);
+            analytics.put("avg", avg);
 
             return analytics;
-        }catch (Exception e){
+        } catch (Exception e) {
             log.error("Error fetching processing time analytics", e);
             throw new RuntimeException("Failed to fetch analytics", e);
         }
     }
 
-    private double calculateChannelSuccessRate(String channel){
+    private double calculateChannelSuccessRate(String channel) {
         long total = jobRepository.countByJobType(channel);
         if (total == 0) return 0;
         long completed = jobRepository.countByJobTypeAndStatus(channel, JobStatus.COMPLETED);
@@ -287,63 +326,86 @@ public class JobService {
     }
 
     private double calculateAverageRetryCount() {
-        List<Job> allJobs = jobRepository.findAll();
-        return allJobs.stream()
-                .mapToInt(Job::getAttemptCount)
-                .average()
-                .orElse(0);
+        Double avg = jobRepository.getAverageRetryCount();
+        return avg != null ? avg : 0.0;
     }
 
     private String getMostCommonError() {
-        List<Job> failedJobs = jobRepository.findByStatus(JobStatus.FAILED);
-        return failedJobs.stream()
-                .filter(j -> j.getLast_error() != null)
-                .collect(Collectors.groupingByConcurrent(
-                        Job::getLast_error,
-                        Collectors.counting()))
-                .entrySet().stream()
-                .max((a, b) -> Long.compare(a.getValue(), b.getValue()))
-                .map(Map.Entry::getKey)
-                .orElse(null);
+        List<String> commonErrors = jobRepository.findMostCommonErrors(PageRequest.of(0, 1));
+        return commonErrors.isEmpty() ? null : commonErrors.get(0);
     }
 
     // ============ Helper Methods ============
 
     private JobResponse convertToJobResponse(Job job) {
+        String recipient = null;
+        String subject = null;
+        Long userId = null;
+        String channel = null;
+
+        if (job.getNotification() != null) {
+            subject = job.getNotification().getSubject();
+            if (job.getNotification().getChannel() != null) {
+                channel = job.getNotification().getChannel().name();
+            }
+            if (job.getNotification().getUser() != null) {
+                recipient = job.getNotification().getUser().getEmail();
+                userId = job.getNotification().getUser().getId();
+            }
+        }
+
         return JobResponse.builder()
                 .jobId(job.getJobId())
-                .notificationId(String.valueOf(job.getNotification().getNotificationId()))
+                .notificationId(job.getNotification() != null ? String.valueOf(job.getNotification().getNotificationId()) : null)
                 .status(job.getStatus())
                 .jobType(job.getJobType())
-//                .recipient(job.getRecipient())
-//                .subject(job.getSubject())
+                .recipient(recipient)
+                .subject(subject)
+                .userId(userId)
+                .channel(channel)
                 .attemptCount(job.getAttemptCount())
-                .maxAttempts(5)
+                .maxAttempts(job.getMaxAttempts() > 0 ? job.getMaxAttempts() : 5)
                 .createdAt(job.getCreatedAt())
                 .completedAt(job.getCompletedAt())
                 .lastError(job.getLast_error())
                 .processingTimeSeconds(job.getProcessingTime())
-//                .workerId(job.getWorkerId())
                 .priority(String.valueOf(job.getPriority()))
-//                .userId(job.getUserId())
-//                .inDeadLetterQueue(job.isInDeadLetterQueue())
+                .inDeadLetterQueue(job.getStatus() == JobStatus.DEAD_LETTER)
                 .build();
     }
 
     private DeadLetterJobResponse convertToDeadLetterResponse(Job job) {
+        String recipient = null;
+        String subject = null;
+        Long userId = null;
+
+        if (job.getNotification() != null) {
+            subject = job.getNotification().getSubject();
+            if (job.getNotification().getUser() != null) {
+                recipient = job.getNotification().getUser().getEmail();
+                userId = job.getNotification().getUser().getId();
+            }
+        }
+
+        DeadLetterJob dlq = job.getDeadLetterJob();
+        String reason = (dlq != null && dlq.getReason() != null) ? dlq.getReason() : job.getLast_error();
+        LocalDateTime failedAt = (dlq != null && dlq.getFailedAt() != null) ? dlq.getFailedAt() : job.getUpdatedAt();
+
         return DeadLetterJobResponse.builder()
                 .jobId(job.getJobId())
-                .notificationId(String.valueOf(job.getNotification().getNotificationId()))
+                .notificationId(job.getNotification() != null ? String.valueOf(job.getNotification().getNotificationId()) : null)
                 .type(job.getJobType())
-//                .recipient(job.getRecipient())
-//                .subject(job.getSubject())
+                .recipient(recipient)
+                .subject(subject)
                 .attemptCount(job.getAttemptCount())
-                .maxAttempts(5)
+                .maxAttempts(job.getMaxAttempts() > 0 ? job.getMaxAttempts() : 5)
                 .lastError(job.getLast_error())
                 .createdAt(job.getCreatedAt())
+                .movedToDlqAt(failedAt)
                 .lastAttemptedAt(job.getUpdatedAt())
-//                .userId(job.getUserId())
+                .userId(userId)
                 .priority(String.valueOf(job.getPriority()))
+                .dlqReason(reason)
                 .canRetry(true)
                 .build();
     }

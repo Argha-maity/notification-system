@@ -27,6 +27,8 @@ public class Job {
 
     @Column(name = "job_type")
     private String jobType;
+
+    @Enumerated(EnumType.STRING)
     private JobStatus status;
     private int priority;
 
@@ -48,7 +50,7 @@ public class Job {
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
     private String last_error;
-    private double processingTime;
+    private Double processingTime;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false, nullable = false)
@@ -58,7 +60,7 @@ public class Job {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    @OneToOne(cascade = CascadeType.ALL)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "notification_id")
     private Notification notification;
 

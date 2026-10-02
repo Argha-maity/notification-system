@@ -3,7 +3,10 @@ export const API_CONFIG = {
   REFRESH_INTERVAL: 5000,
   REQUEST_TIMEOUT: 10000,
   TOKEN_KEY: 'notification_token',
+  USER_KEY: 'notification_user',
   ENDPOINTS: {
+    AUTH_LOGIN: '/auth/login',
+    AUTH_SIGNUP: '/auth/signup',
     STATS: '/jobs/stats',
     JOBS: '/jobs',
     JOB_DETAILS: (id) => `/jobs/${id}`,
@@ -14,8 +17,12 @@ export const API_CONFIG = {
     WORKERS: '/workers',
     WORKER_STATS: '/workers/stats',
     ANALYTICS: '/analytics',
-    TIMELINE: '/analytics/timeline',
-    PROCESSING_TIME: '/analytics/processing-time',
+    TIMELINE: '/jobs/analytics/timeline',
+    PROCESSING_TIME: '/jobs/analytics/processing-time',
+    ADMIN_STATS: '/admin/stats',
+    ADMIN_QUEUE_CLEAR: '/admin/queue/clear',
+    ADMIN_DLQ_PURGE: '/admin/queue/dead-letter/purge',
+    ADMIN_RETRY_ALL: '/admin/jobs/retry-all',
   }
 };
 
@@ -34,7 +41,6 @@ export async function apiCall(endpoint, options = {}) {
   
   try {
     const response = await fetch(url, {
-      timeout: API_CONFIG.REQUEST_TIMEOUT,
       ...options,
       headers,
     });
@@ -42,12 +48,31 @@ export async function apiCall(endpoint, options = {}) {
     if (!response.ok) {
       if (response.status === 401) {
         localStorage.removeItem(API_CONFIG.TOKEN_KEY);
-        window.location.href = '/login';
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+        }
       }
-      throw new Error(`API Error: ${response.statusText}`);
+      let errorMsg = `API Error: ${response.status} ${response.statusText}`;
+      try {
+        const errJson = await response.json();
+        if (errJson.message) errorMsg = errJson.message;
+        else if (errJson.error) errorMsg = errJson.error;
+      } catch {
+        try {
+          const errText = await response.text();
+          if (errText) errorMsg = errText;
+        } catch {
+          // ignore
+        }
+      }
+      throw new Error(errorMsg);
     }
     
-    return await response.json();
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      return await response.json();
+    }
+    return await response.text();
   } catch (error) {
     console.error('API Call failed:', error);
     throw error;
@@ -77,3 +102,4 @@ export function apiDelete(endpoint) {
 }
 
 export default API_CONFIG;
+

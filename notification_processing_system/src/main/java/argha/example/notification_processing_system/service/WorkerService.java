@@ -2,6 +2,8 @@ package argha.example.notification_processing_system.service;
 
 import argha.example.notification_processing_system.dto.response.WorkerStatsResponse;
 import argha.example.notification_processing_system.entity.Worker;
+import argha.example.notification_processing_system.entity.type.WorkerHealthStatus;
+import argha.example.notification_processing_system.entity.type.WorkerStatus;
 import argha.example.notification_processing_system.repository.JobRepository;
 import argha.example.notification_processing_system.repository.WorkerRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -65,20 +67,20 @@ public class WorkerService {
             poolStats.put("totalWorkers", allWorkers.size());
             poolStats.put("activeWorkers",
                     (int) allWorkers.stream()
-                            .filter(w -> "ACTIVE".equals(w.getStatus()))
+                            .filter(w -> WorkerStatus.ACTIVE.name().equals(w.getStatus()))
                             .count());
             poolStats.put("idleWorkers",
                     (int) allWorkers.stream()
-                            .filter(w -> "IDLE".equals(w.getStatus()))
+                            .filter(w -> WorkerStatus.IDLE.name().equals(w.getStatus()))
                             .count());
             poolStats.put("pausedWorkers",
                     (int) allWorkers.stream()
-                            .filter(w -> "PAUSED".equals(w.getStatus()))
+                            .filter(w -> WorkerStatus.PAUSED.name().equals(w.getStatus()))
                             .count());
             poolStats.put("unhealthyWorkers",
                     (int) allWorkers.stream()
-                            .filter(w -> "DEGRADED".equals(w.getHealthStatus()) ||
-                                    "UNHEALTHY".equals(w.getHealthStatus()))
+                            .filter(w -> WorkerHealthStatus.DEGRADED.name().equals(w.getHealthStatus()) ||
+                                    WorkerHealthStatus.UNHEALTHY.name().equals(w.getHealthStatus()))
                             .count());
 
             // Performance metrics
@@ -186,7 +188,7 @@ public class WorkerService {
             health.put("lastChecked", LocalDateTime.now());
             health.put("unhealthyWorkers",
                     workerHealth.stream()
-                            .filter(w -> !("HEALTHY".equals(w.get("healthStatus"))))
+                            .filter(w -> !(WorkerHealthStatus.HEALTHY.name().equals(w.get("healthStatus"))))
                             .count());
 
             return health;
@@ -233,8 +235,8 @@ public class WorkerService {
             Worker worker = Worker.builder()
                     .workerId(workerId)
                     .workerName(workerName)
-                    .status("ACTIVE")
-                    .healthStatus("HEALTHY")
+                    .status(WorkerStatus.ACTIVE.name())
+                    .healthStatus(WorkerHealthStatus.HEALTHY.name())
                     .enabled(true)
                     .acceptingJobs(true)
                     .startedAt(LocalDateTime.now())
@@ -262,8 +264,8 @@ public class WorkerService {
             if (worker.isPresent()) {
                 Worker w = worker.get();
                 w.setEnabled(false);
-                w.setStatus("STOPPED");
-                w.setHealthStatus("DOWN");
+                w.setStatus(WorkerStatus.STOPPED.name());
+                w.setHealthStatus(WorkerHealthStatus.DOWN.name());
                 w.setAcceptingJobs(false);
                 workerRepository.save(w);
                 log.info("Worker {} unregistered successfully", workerId);
@@ -317,7 +319,7 @@ public class WorkerService {
 //        log.info("Fetching workers processing job type: {}", jobType);
         try {
             // Get all active workers (can add job type filtering if Job entity tracks it)
-            List<Worker> workers = workerRepository.findByStatusAndEnabled("ACTIVE", true);
+            List<Worker> workers = workerRepository.findByStatusAndEnabled(WorkerStatus.ACTIVE.name(), true);
 
             return workers.stream()
                     .map(this::convertToWorkerStatsResponse)
@@ -334,8 +336,8 @@ public class WorkerService {
 
         try {
             return workerRepository.findByWorkerId(workerId)
-                    .map(w -> ("HEALTHY".equals(w.getHealthStatus()) || "DEGRADED".equals(w.getHealthStatus()))
-                            && "ACTIVE".equals(w.getStatus())
+                    .map(w -> (WorkerHealthStatus.HEALTHY.name().equals(w.getHealthStatus()) || WorkerHealthStatus.DEGRADED.name().equals(w.getHealthStatus()))
+                            && WorkerStatus.ACTIVE.name().equals(w.getStatus())
                             && w.isEnabled())
                     .orElse(false);
         } catch (Exception e) {
@@ -402,17 +404,17 @@ public class WorkerService {
     }
 
     private String calculateOverallHealth(List<Worker> workers) {
-        if (workers.isEmpty()) return "DOWN";
+        if (workers.isEmpty()) return WorkerHealthStatus.DOWN.name();
 
         long healthyCount = workers.stream()
-                .filter(w -> "HEALTHY".equals(w.getHealthStatus()) && w.isEnabled())
+                .filter(w -> WorkerHealthStatus.HEALTHY.name().equals(w.getHealthStatus()) && w.isEnabled())
                 .count();
 
         double healthyPercent = (healthyCount / (double) workers.size()) * 100;
 
-        if (healthyPercent >= 80) return "HEALTHY";
-        if (healthyPercent >= 50) return "DEGRADED";
-        return "UNHEALTHY";
+        if (healthyPercent >= 80) return WorkerHealthStatus.HEALTHY.name();
+        if (healthyPercent >= 50) return WorkerHealthStatus.DEGRADED.name();
+        return WorkerHealthStatus.UNHEALTHY.name();
     }
 
     @Transactional
@@ -424,8 +426,8 @@ public class WorkerService {
             List<Worker> staleWorkers = workerRepository.findWorkersWithoutRecentHeartbeat(threshold);
 
             staleWorkers.forEach(worker -> {
-                worker.setStatus("STOPPED");
-                worker.setHealthStatus("DOWN");
+                worker.setStatus(WorkerStatus.STOPPED.name());
+                worker.setHealthStatus(WorkerHealthStatus.DOWN.name());
                 worker.setAcceptingJobs(false);
                 worker.setLastError("No heartbeat received");
                 log.warn("Marked worker {} as stale", worker.getWorkerId());
